@@ -1,0 +1,14 @@
+algorithm: round-robin
+proxy_servers:
+    - host:
+            name: hello-world
+            address: localhost
+            port: 8081
+            health: "/"
+            protocol: http
+    - host:
+            name: hello-world-2
+            address: localhost
+            port: 8082
+            health: "/"
+            protocol: http
