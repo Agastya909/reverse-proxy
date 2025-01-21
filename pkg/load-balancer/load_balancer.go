@@ -3,8 +3,8 @@ package loadbalancer
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
+	"reverse_proxy/config"
 	"sync"
 	"time"
 )
@@ -20,22 +20,25 @@ func (lb *LoadBalancer) HealthCheck() {
 	defer ticker.Stop()
 
 	for range ticker.C {
-		var wg sync.WaitGroup
+		var (
+			wg           sync.WaitGroup
+			healthyHosts []interface{}
+		)
 		for _, server := range lb.Proxy.ProxyServers {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				url := fmt.Sprintf("%s://%s:%v%s", server.Host.Protocol, server.Host.Address, server.Host.Port, server.Host.Health)
+				url := fmt.Sprintf("%s://%s:%v%s", server.Protocol, server.Address, server.Port, server.Health)
 				isHealthy := lb.isHealthy(url)
 				if isHealthy {
-					lb.HealthyHostMap.Store(server.Host.Name, server.Host)
+					lb.HealthyHostMap.Store(server.Name, server)
 				} else {
-					lb.HealthyHostMap.Delete(server.Host.Name)
+					lb.HealthyHostMap.Delete(server.Name)
 				}
 			}()
 		}
 		lb.HealthyHostMap.Range(func(key, value interface{}) bool {
-			log.Println("Healthy Hosts after check: ", key)
+			healthyHosts = append(healthyHosts, value.(config.Host).Name)
 			return true
 		})
 		wg.Wait()

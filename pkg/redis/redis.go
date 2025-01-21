@@ -2,22 +2,59 @@ package redis
 
 import "context"
 
-func (r *RedisClient) Set(key string, value interface{}) error {
-	return r.Client.Set(context.Background(), key, value, 0).Err()
+func (r *RedisClient) Set(ctx context.Context, key string, value interface{}) error {
+	return r.Client.Set(ctx, key, value, 0).Err()
 }
 
-func (r *RedisClient) Get(key string) (string, error) {
-	return r.Client.Get(context.Background(), key).Result()
+func (r *RedisClient) Get(ctx context.Context, key string) (string, error) {
+	return r.Client.Get(ctx, key).Result()
 }
 
-func (r *RedisClient) AddRequestToRedisCounter(hostName string) error {
-	return r.Client.Incr(context.Background(), hostName).Err()
+func (r *RedisClient) AddRequestToRedisCounter(ctx context.Context, hostName string) error {
+	return r.Client.Incr(ctx, hostName).Err()
 }
 
-func (r *RedisClient) RemoveRequestFromRedisCounter(hostName string) (int64, error) {
-	return r.Client.Decr(context.Background(), hostName).Result()
+func (r *RedisClient) RemoveRequestFromRedisCounter(ctx context.Context, hostName string) (int64, error) {
+	return r.Client.Decr(ctx, hostName).Result()
 }
 
-func (r *RedisClient) FlushDB() error {
+func (r *RedisClient) FlushDB(ctx context.Context) error {
 	return r.Client.FlushDBAsync(context.Background()).Err()
+}
+
+func (r *RedisClient) UpsertArrayToRedis(ctx context.Context, key string, values []interface{}) error {
+	pipe := r.Client.Pipeline()
+	exists := r.Client.Exists(ctx, key).Val()
+	if exists == 1 {
+		pipe.Del(ctx, key)
+	}
+	err := pipe.RPush(ctx, key, values...).Err()
+	if err != nil {
+		return err
+	}
+	_, err = pipe.Exec(ctx)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r *RedisClient) GetAndRemoveFirstArrayItem(ctx context.Context, key string) (string, error) {
+	return r.Client.LPop(ctx, key).Result()
+}
+
+func (r *RedisClient) AddItemToArrayTail(ctx context.Context, key string, value interface{}) error {
+	return r.Client.RPush(ctx, key, value).Err()
+}
+
+func (r *RedisClient) IsKeyExists(ctx context.Context, key string) bool {
+	val := r.Client.Exists(ctx, key)
+	if val.Err() != nil || val.Val() == 0 {
+		return false
+	}
+	return true
+}
+
+func (r *RedisClient) GetArrayKeyLen(ctx context.Context, key string) (int64, error) {
+	return r.Client.LLen(ctx, key).Result()
 }

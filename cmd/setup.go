@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"reverse_proxy/config"
 	loadbalancer "reverse_proxy/pkg/load-balancer"
@@ -20,7 +22,7 @@ func Setup() {
 	lb := loadbalancer.NewLoadBalancer(&env, &proxyConfig, httpClient, healtyHostMap, redis)
 	proxy := trafficproxy.NewTrafficProxy(&env, &proxyConfig, healtyHostMap)
 	lb.Start()
-	proxy.Start(redis)
+	proxy.Start(redis, lb)
 }
 
 func getConfigs() (config.SystemEnv, config.ProxyMapping) {
@@ -31,6 +33,9 @@ func getConfigs() (config.SystemEnv, config.ProxyMapping) {
 
 func setupRedis(env *config.SystemEnv) *redis.RedisClient {
 	redis := redis.NewRedisClient(env.Redis.DB, fmt.Sprintf("%s:%d", env.Redis.Host, env.Redis.Port), env.Redis.Password)
-	redis.FlushDB()
+	err := redis.FlushDB(context.Background())
+	if err != nil {
+		log.Fatalf("Error flushing redis db: %v", err)
+	}
 	return redis
 }
