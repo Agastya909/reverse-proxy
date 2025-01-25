@@ -1,14 +1,23 @@
-algorithm: round-robin
+algorithm: round_robin
 proxy_servers:
-    - host:
-            name: hello-world
-            address: localhost
-            port: 8081
-            health: "/"
-            protocol: http
-    - host:
-            name: hello-world-2
-            address: localhost
-            port: 8082
-            health: "/"
-            protocol: http
+  - name: hello-world
+    address: localhost
+    port: 8081
+    health: "/"
+    protocol: http
+  - name: hello-world-2
+    address: localhost
+    port: 8082
+    health: "/"
+    protocol: http
+  - name: hello-world-3
+    address: localhost
+    port: 8083
+    health: "/"
+    protocol: http
+route_matching:
+  "^/$":
+    - hello-world-2
+  "^/user(/.*|\\?.*)?$":
+    - hello-world
+    - hello-world-3

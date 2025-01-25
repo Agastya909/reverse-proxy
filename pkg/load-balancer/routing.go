@@ -7,30 +7,34 @@ import (
 	"reverse_proxy/config"
 )
 
-func (lb *LoadBalancer) GetHostForRequest() (config.Host, error) {
+func (lb *LoadBalancer) GetHostForRequest(routeBasedMatching bool, allowedHosts []string, key string) (config.Host, error) {
 	var (
-		host  config.Host
-		hosts []string
+		host         config.Host
+		healthyHosts []string
+		redisKey     string = lb.Proxy.Algorithm
 	)
-	hosts = lb.getAvailableHosts()
+	healthyHosts = lb.getAvailableHosts()
 
-	if len(hosts) == 0 {
+	if len(healthyHosts) == 0 {
 		return host, fmt.Errorf("no available hosts")
 	}
 
+	if routeBasedMatching {
+		redisKey = key
+	}
 	// if len(hosts) == 1 {
 	// 	return , nil
 	// }
 
 	switch lb.Proxy.Algorithm {
-	case "round-robin":
-		host, err := lb.RoundRobin(hosts)
+	case "round_robin":
+		host, err := lb.RoundRobin(healthyHosts, allowedHosts, routeBasedMatching, redisKey)
 		if err != nil {
 			return host, err
 		}
 		return host, nil
 	default:
-		host, err := lb.RoundRobin(hosts)
+		host, err := lb.RoundRobin(healthyHosts, allowedHosts, routeBasedMatching, redisKey)
 		if err != nil {
 			return host, err
 		}
@@ -47,41 +51,82 @@ func (lb *LoadBalancer) getAvailableHosts() []string {
 	return hosts
 }
 
-func (lb *LoadBalancer) RoundRobin(hosts []string) (config.Host, error) {
+func (lb *LoadBalancer) RoundRobin(healthyHosts, allowedHosts []string, routeBasesdMatching bool, redisKey string) (config.Host, error) {
 	var (
-		host                 config.Host
-		ctx                        = context.Background()
-		healthyHostFound           = false
-		counter              int64 = 0
-		roundRobinListLength int64 = 0
+		host config.Host
+		ctx  = context.Background()
 	)
 
-	exists := lb.Redis.IsKeyExists(ctx, "round_robin")
+	exists := lb.Redis.IsKeyExists(ctx, redisKey)
 	if !exists {
-		var hostList []interface{}
-		data, ok := lb.HealthyHostMap.Load(hosts[0])
-		if !ok {
-			return host, fmt.Errorf("host not found")
+		if routeBasesdMatching {
+			host, err := lb.saveNewHostsToRedis(ctx, allowedHosts, redisKey)
+			if err != nil {
+				return config.Host{}, err
+			}
+			return host, nil
 		}
-		for _, h := range hosts[1:] {
-			hostList = append(hostList, h)
-		}
-		err := lb.Redis.UpsertArrayToRedis(context.Background(), "round_robin", hostList)
+
+		host, err := lb.saveNewHostsToRedis(ctx, healthyHosts, redisKey)
 		if err != nil {
-			log.Println("Failed to add healthy hosts to redis: ", err)
+			return config.Host{}, err
 		}
-		err = lb.Redis.AddItemToArrayTail(ctx, "round_robin", hosts[0])
-		if err != nil {
-			log.Println("Failed to add item to round robin list: ", err)
-		}
-		host = data.(config.Host)
 		return host, nil
 	}
 
-	roundRobinListLength, err := lb.Redis.GetArrayKeyLen(ctx, "round_robin")
+	if routeBasesdMatching {
+		host, err := lb.getHostAndUpdateRedisRoundRobin(ctx, allowedHosts, redisKey)
+		if err != nil {
+			return config.Host{}, err
+		}
+		return host, nil
+	}
+
+	host, err := lb.getHostAndUpdateRedisRoundRobin(ctx, healthyHosts, redisKey)
+	if err != nil {
+		return config.Host{}, err
+	}
+
+	return host, nil
+}
+
+func (lb *LoadBalancer) saveNewHostsToRedis(ctx context.Context, hosts []string, key string) (config.Host, error) {
+	var (
+		host     interface{}
+		hostList []interface{}
+	)
+
+	for _, h := range hosts {
+		hostData, ok := lb.HealthyHostMap.Load(h)
+		if ok {
+			hostList = append(hostList, h)
+			host = hostData
+		}
+	}
+
+	if len(hostList) == 0 {
+		return config.Host{}, fmt.Errorf("no healthy hosts found")
+	}
+
+	err := lb.Redis.UpsertArrayToRedis(ctx, key, hostList)
+	if err != nil {
+		return config.Host{}, fmt.Errorf("failed to add healthy hosts to redis: %v", err)
+	}
+
+	return host.(config.Host), nil
+}
+
+func (lb *LoadBalancer) getHostAndUpdateRedisRoundRobin(ctx context.Context, hosts []string, key string) (config.Host, error) {
+	var (
+		roundRobinListLength int64 = 0
+		counter              int64 = 0
+		host                 config.Host
+		healthyHostFound     bool = false
+	)
+	roundRobinListLength, err := lb.Redis.GetArrayKeyLen(ctx, key)
 	if err != nil {
 		log.Println("Failed to get round robin list length: ", err)
-		return host, err
+		return config.Host{}, err
 	}
 
 	for !healthyHostFound {
@@ -89,18 +134,21 @@ func (lb *LoadBalancer) RoundRobin(hosts []string) (config.Host, error) {
 			healthyHostFound = true
 		}
 		counter++
-		value, err := lb.Redis.GetAndRemoveFirstArrayItem(ctx, "round_robin")
+
+		value, err := lb.Redis.GetAndRemoveFirstArrayItem(ctx, key)
 		if err != nil {
-			log.Println("Failed to get round robin value from redis: ", err)
+			log.Printf("Failed to get %s value from redis: %s ", key, err)
 			continue
 		}
+
 		data, ok := lb.HealthyHostMap.Load(value)
 		if !ok {
 			log.Println("Failed to get host from healthy host map: ", err)
 			continue
 		}
+
 		host = data.(config.Host)
-		err = lb.Redis.AddItemToArrayTail(ctx, "round_robin", value)
+		err = lb.Redis.AddItemToArrayTail(ctx, key, value)
 		if err != nil {
 			log.Println("Failed to add item to round robin list: ", err)
 		}

@@ -17,8 +17,9 @@ type SystemEnv struct {
 }
 
 type ProxyMapping struct {
-	Algorithm    string `yaml:"algorithm"`
-	ProxyServers []Host `yaml:"proxy_servers"`
+	Algorithm     string              `yaml:"algorithm"`
+	ProxyServers  []Host              `yaml:"proxy_servers"`
+	RouteMatching map[string][]string `yaml:"route_matching"`
 }
 
 type Host struct {

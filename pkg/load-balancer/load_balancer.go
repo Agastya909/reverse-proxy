@@ -3,6 +3,7 @@ package loadbalancer
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"reverse_proxy/config"
 	"sync"
@@ -37,6 +38,12 @@ func (lb *LoadBalancer) HealthCheck() {
 				}
 			}()
 		}
+		if len(healthyHosts) > 0 {
+			err := lb.Redis.UpsertArrayToRedis(context.Background(), "healthy_hosts", healthyHosts)
+			if err != nil {
+				log.Println("Failed to add healthy hosts to redis: ", err)
+			}
+		}
 		lb.HealthyHostMap.Range(func(key, value interface{}) bool {
 			healthyHosts = append(healthyHosts, value.(config.Host).Name)
 			return true
@@ -57,5 +64,6 @@ func (lb *LoadBalancer) isHealthy(url string) bool {
 		return false
 	}
 	defer res.Body.Close()
+	log.Println("Health check response: ", res.StatusCode, url)
 	return res.StatusCode == http.StatusOK
 }

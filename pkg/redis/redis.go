@@ -1,6 +1,9 @@
 package redis
 
-import "context"
+import (
+	"context"
+	"fmt"
+)
 
 func (r *RedisClient) Set(ctx context.Context, key string, value interface{}) error {
 	return r.Client.Set(ctx, key, value, 0).Err()
@@ -24,11 +27,15 @@ func (r *RedisClient) FlushDB(ctx context.Context) error {
 
 func (r *RedisClient) UpsertArrayToRedis(ctx context.Context, key string, values []interface{}) error {
 	pipe := r.Client.Pipeline()
-	exists := r.Client.Exists(ctx, key).Val()
+	redisCmd := r.Client.Exists(ctx, key)
+	exists, err := redisCmd.Val(), redisCmd.Err()
+	if err != nil {
+		return fmt.Errorf("error checking if key exists: %v", err)
+	}
 	if exists == 1 {
 		pipe.Del(ctx, key)
 	}
-	err := pipe.RPush(ctx, key, values...).Err()
+	err = pipe.RPush(ctx, key, values...).Err()
 	if err != nil {
 		return err
 	}
